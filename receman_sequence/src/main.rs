@@ -4,7 +4,7 @@ use num_traits::One;
 use stwo::{
     core::{
         channel::{ Blake2sChannel, Channel}, 
-        fields::{qm31::{QM31, SecureField}, FieldExpOps}, 
+        fields::{qm31::{SecureField}, FieldExpOps}, 
         pcs::{CommitmentSchemeVerifier, PcsConfig}, 
         poly::circle::CanonicCoset, vcs::blake2_merkle::Blake2sMerkleChannel, verifier::verify, ColumnVec}, 
     prover::{
@@ -29,8 +29,9 @@ use stwo_constraint_framework::{
 };
 
 const LOG_CONSTRAINT_EVAL_BLOWUP_FACTOR: u32 = 1;
-const NUM_COLS: u32 = 3;
-// relation!(PublicInputElements, 2);
+const NUM_COLS: u32 = 10;
+relation!(PublicInputElements, 2);
+
 pub struct PublicDataClaim {
     public_input: Vec<Vec<PackedM31>>,
 }
@@ -98,27 +99,6 @@ pub fn gen_trace(
     (trace, PublicDataClaim{public_input})
 }
 
-struct IsFirstColumn {
-    log_size: u32
-}
-
-impl IsFirstColumn {
-    fn new(log_size: usize) -> Self {
-        Self { log_size: log_size as u32 }
-    }
-
-    fn gen_column(&self) -> CircleEvaluation<SimdBackend, M31, BitReversedOrder> {
-        let mut col = BaseColumn::zeros(1 << self.log_size);
-        col.set(0, M31::from(1));
-        let domain = CanonicCoset::new(self.log_size).circle_domain();
-        CircleEvaluation::new(domain, col)
-    }
-
-    fn id(&self) -> PreProcessedColumnId {
-        PreProcessedColumnId { id: format!("is_first_{}", self.log_size) }
-    }
-}
-
 struct RecamanEval {
     // is_first_column_id: PreProcessedColumnId,
     log_size: u32,
@@ -135,18 +115,15 @@ impl FrameworkEval for RecamanEval {
     }
 
     fn evaluate<E: EvalAtRow>(&self, mut eval: E) -> E {
-        // let _is_first_column = eval.get_preprocessed_column(self.is_first_column_id.clone());
-
         let first = eval.next_trace_mask();
         let second = eval.next_trace_mask();
 
         // |a_{n}-a_{n-1}| = n (1 - 16)
         eval.add_constraint(second.clone() - first.clone() - second.clone());
+        let mut previous = second.clone();
 
         for i in 2..NUM_COLS {
-            let mut previous = second.clone();
             let next = eval.next_trace_mask();
-
             // |a_{n}-a_{n-1}| = n
             eval.add_constraint((next.clone() - previous.clone() - E::F::from(M31::from(i))) * (next.clone() - previous.clone() + E::F::from(M31::from(i))));
             previous = next
@@ -173,10 +150,7 @@ impl FrameworkEval for RecamanEval {
 // // 0 7 5 2
 
 
-relation!(PublicInputElements, 3);
-
 fn main() {
-    let num_rows: usize = 16;
     let log_num_rows: u32 = 4; // log2(16)
 
     let (trace, public_data_claim) = gen_trace(log_num_rows);
@@ -248,7 +222,7 @@ fn main() {
 
     println!("Generating proof for execution trace...");
     // Prove
-     let proof = prove(&[&component], channel, commitment_scheme).unwrap();
+    let proof = prove(&[&component], channel, commitment_scheme).unwrap();
     println!("Proof generated successfully. ✅");
 
     println!("Verifying proof...");
